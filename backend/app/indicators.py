@@ -82,7 +82,7 @@ def add_indicators(frame: pd.DataFrame) -> pd.DataFrame:
     df["bb_pct"] = (close - df["bb_lo"]) / width
 
     typical = (high + low + close) / 3
-    session = df.index.tz_convert("Africa/Johannesburg").date
+    session = pd.Series(df.index.tz_convert("Africa/Johannesburg").date, index=df.index)
     grouped_tv = (typical * df["volume"]).groupby(session).cumsum()
     grouped_v = df["volume"].groupby(session).cumsum().replace(0, np.nan)
     df["vwap"] = grouped_tv / grouped_v

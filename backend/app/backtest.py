@@ -6,47 +6,38 @@ import numpy as np
 import pandas as pd
 
 from app.logic import HORIZON_BARS, PIP, position_size
-from app.model import predict_frame
 
 # Historical pip conversion. The live calculator uses the live USD/ZAR rate.
 BACKTEST_USDZAR = 18.20
 
 
-def _outcome_frame(bundle: dict) -> pd.DataFrame:
-    oos = predict_frame(bundle)
-    mapping = {0: "bearish", 1: "bullish", 2: "neutral"}
-    oos["direction"] = [mapping[int(value)] for value in oos["pred"]]
-    oos["confidence"] = oos[["p_bear", "p_bull", "p_neutral"]].max(axis=1) * 100
-    forced = (oos["direction"] != "neutral") & (oos["confidence"] < 55)
-    oos.loc[forced, "direction"] = "neutral"
-    return oos
-
-
 def run_backtest(
-    bundle: dict,
+    frame: pd.DataFrame,
+    timeframe: str,
+    oos_start: pd.Timestamp,
     start: pd.Timestamp,
     end: pd.Timestamp,
     capital: float,
     risk_pct: float,
 ) -> dict:
-    oos_start = pd.Timestamp(bundle["oos_start"])
     if oos_start.tzinfo is None:
         oos_start = oos_start.tz_localize("UTC")
     if start.tzinfo is None:
         start = start.tz_localize("UTC")
     if end.tzinfo is None:
         end = end.tz_localize("UTC")
-    if start < oos_start:
+    if start.date() < oos_start.date():
         raise ValueError(
             f"That range includes data the model trained on. Start on or after {oos_start.date().isoformat()}."
         )
+    if start < oos_start:
+        start = oos_start
 
-    frame = _outcome_frame(bundle)
     window = frame[(frame.index >= start) & (frame.index <= end)].copy()
     if window.empty:
         raise ValueError("No candles in that range.")
 
-    horizon = HORIZON_BARS[bundle["timeframe"]]
+    horizon = HORIZON_BARS[timeframe]
     equity = capital
     peak = capital
     max_dd = 0.0
@@ -144,7 +135,7 @@ def run_backtest(
     decided = len(wins) + len(losses)
     win_rate = None if decided == 0 else len(wins) / decided * 100
     return {
-        "timeframe": bundle["timeframe"],
+        "timeframe": timeframe,
         "start": start.isoformat(),
         "end": end.isoformat(),
         "capital": capital,
@@ -166,8 +157,7 @@ def run_backtest(
     }
 
 
-def history_rows(bundle: dict, limit: int = 400) -> list[dict]:
-    frame = _outcome_frame(bundle)
+def history_rows(frame: pd.DataFrame, timeframe: str, limit: int = 400) -> list[dict]:
     tail = frame.tail(limit)
     closes = tail["close"].to_numpy()
     directions = tail["direction"].tolist()
@@ -191,7 +181,7 @@ def history_rows(bundle: dict, limit: int = 400) -> list[dict]:
         rows.append(
             {
                 "time": stamp.isoformat(),
-                "timeframe": bundle["timeframe"],
+                "timeframe": timeframe,
                 "prediction": direction.upper() if direction != "neutral" else "NEUTRAL",
                 "confidence": round(float(row["confidence"]), 1),
                 "outcome": outcome,

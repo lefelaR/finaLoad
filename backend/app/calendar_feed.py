@@ -17,6 +17,16 @@ def _at(day: datetime, hour: int, minute: int) -> datetime:
     return local.astimezone(timezone.utc)
 
 
+def _next_clock(now: datetime, hour: int, minute: int) -> datetime:
+    local = now.astimezone(SAST)
+    candidate = _at(local, hour, minute)
+    if candidate <= now:
+        candidate = _at(local + timedelta(days=1), hour, minute)
+    while candidate.astimezone(SAST).weekday() >= 5:
+        candidate = _at(candidate.astimezone(SAST) + timedelta(days=1), hour, minute)
+    return candidate
+
+
 def _next_weekday(now: datetime, weekday: int, hour: int, minute: int) -> datetime:
     local = now.astimezone(SAST)
     days = (weekday - local.weekday()) % 7
@@ -46,12 +56,9 @@ def _first_friday(now: datetime, hour: int, minute: int) -> datetime:
 
 def upcoming_events(now: datetime | None = None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
-    local = now.astimezone(SAST)
     events = [
         {
-            "time": _next_weekday(now, local.weekday(), 15, 30)
-            if _at(local, 15, 30) > now
-            else _at(local + timedelta(days=1), 15, 30),
+            "time": _next_clock(now, 15, 30),
             "event": "US Retail Sales",
             "currency": "USD",
             "forecast": "0.3%",

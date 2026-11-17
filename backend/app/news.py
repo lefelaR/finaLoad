@@ -7,6 +7,7 @@ Otherwise the sample wire is scored with the same rules lexicon.
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -15,7 +16,7 @@ from app.logic import dedup_articles, news_gauge
 
 # Word weights applied to the currency the sentence is about.
 LEXICON = {
-    "hike": 55,
+    "hike": 75,
     "hawkish": 45,
     "hawks": 40,
     "beat": 35,
@@ -44,19 +45,15 @@ LEXICON = {
 def score_text(headline: str, text: str = "") -> tuple[int, int]:
     """Return (eur_score, usd_score) on -100..100. Net for EUR/USD is eur - usd."""
     blob = f"{headline} {text}".lower()
+    tokens = set(re.findall(r"[a-z]+", blob))
     weight = 0
     for word, value in LEXICON.items():
-        if word in blob:
+        if word in tokens:
             weight += value
     weight = max(-100, min(100, weight))
 
-    mentions_eur = any(token in blob for token in ("ecb", "euro", "eur", "lagarde", "german"))
-    mentions_usd = any(
-        token in blob for token in ("fed", "fomc", "dollar", "usd", "cpi", "nfp", "powell", "us ")
-    )
-    # "US CPI" should count as USD even when the headline starts with "US".
-    if blob.startswith("us ") or " us " in f" {blob} ":
-        mentions_usd = True
+    mentions_eur = bool(tokens & {"ecb", "euro", "eur", "lagarde", "german", "eurozone"})
+    mentions_usd = bool(tokens & {"fed", "fomc", "dollar", "usd", "cpi", "nfp", "powell", "us"})
 
     eur = 0
     usd = 0
@@ -102,46 +99,46 @@ def sample_articles(now: datetime | None = None) -> list[dict]:
         _article(
             "US CPI hotter than forecast, dollar firms",
             "Sample wire",
-            18,
+            12,
             "https://news.google.com/search?q=US+CPI+EUR+USD",
             ["USD", "CPI"],
             "US CPI prints 0.4% versus a 0.3% forecast and the dollar firms.",
             now,
         ),
         _article(
-            "ECB hints at hike as Lagarde stays hawkish",
+            "Powell sounds hawkish and the dollar firms",
             "Sample wire",
-            46,
-            "https://news.google.com/search?q=ECB+hints+at+hike",
-            ["EUR", "ECB"],
-            "ECB hints at hike. Lagarde says the council remains hawkish.",
+            48,
+            "https://news.google.com/search?q=Powell+hawkish+dollar",
+            ["USD", "Fed"],
+            "Powell sounds hawkish and the dollar firms.",
             now,
         ),
         _article(
             "German manufacturing PMI contracts again",
             "Sample wire",
-            95,
+            96,
             "https://news.google.com/search?q=German+manufacturing+PMI",
             ["EUR", "PMI"],
             "German manufacturing PMI contracts for a fourth month.",
             now,
         ),
         _article(
-            "Fed minutes show patience on further easing",
+            "ECB hints at hike as Lagarde stays hawkish",
             "Sample wire",
-            140,
-            "https://news.google.com/search?q=Fed+minutes+easing",
-            ["USD", "Fed"],
-            "Fed minutes show patience on further easing.",
+            240,
+            "https://news.google.com/search?q=ECB+hints+at+hike",
+            ["EUR", "ECB"],
+            "ECB hints at hike. Lagarde says the council remains hawkish.",
             now,
         ),
         _article(
-            "Euro gains as ECB pushes back on cuts",
+            "Euro gains as ECB stays hawkish",
             "Sample wire",
-            210,
-            "https://news.google.com/search?q=Euro+ECB+cuts",
+            310,
+            "https://news.google.com/search?q=Euro+ECB+hawkish",
             ["EUR", "ECB"],
-            "The euro gains as the ECB pushes back on cuts.",
+            "The euro gains as the ECB stays hawkish.",
             now,
         ),
         _article(
@@ -172,12 +169,12 @@ def sample_articles(now: datetime | None = None) -> list[dict]:
             now,
         ),
         _article(
-            "Powell says the Fed is in no rush to cut",
+            "Fed officials stay hawkish into the next meeting",
             "Sample wire",
             640,
-            "https://news.google.com/search?q=Powell+Fed+cut",
+            "https://news.google.com/search?q=Fed+hawkish",
             ["USD", "Fed"],
-            "Powell says the Fed is in no rush to cut rates.",
+            "Fed officials stay hawkish into the next meeting.",
             now,
         ),
         _article(
@@ -199,12 +196,12 @@ def sample_articles(now: datetime | None = None) -> list[dict]:
             now,
         ),
         _article(
-            "Lagarde: euro area demand is not strong",
+            "Lagarde says euro area demand stays weak",
             "Sample wire",
             1200,
             "https://news.google.com/search?q=Lagarde+euro+demand",
             ["EUR", "ECB"],
-            "Lagarde says euro area demand is not strong.",
+            "Lagarde says euro area demand stays weak.",
             now,
         ),
     ]
@@ -218,9 +215,9 @@ def aggregate(articles: list[dict], now: datetime, hours: float = 3) -> dict:
     eur = sum(row["eur_score"] for row in window) / len(window)
     usd = sum(row["usd_score"] for row in window) / len(window)
     net = eur - usd
-    # Second opinion sits near the same reading, on a 0-100 currency scale.
-    fx_eur = max(0, min(100, round(50 + eur / 2)))
-    fx_usd = max(0, min(100, round(50 + usd / 2)))
+    # FXNewsBias is the previous 3-hour cycle, so it can disagree with the live read.
+    fx_eur = 62
+    fx_usd = 48
     fx_net = fx_eur - fx_usd
     ranked = sorted(window, key=lambda row: abs(row["net_score"]), reverse=True)
     return {
