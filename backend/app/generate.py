@@ -17,7 +17,13 @@ from app.logic import validate_candle
 def forex_index(start: str, end: datetime | None = None) -> pd.DatetimeIndex:
     if end is None:
         end = datetime.now(timezone.utc)
-    idx = pd.date_range(start, end, freq="h", tz="UTC")
+    start_ts = pd.Timestamp(start, tz="UTC")
+    end_ts = pd.Timestamp(end)
+    if end_ts.tzinfo is None:
+        end_ts = end_ts.tz_localize("UTC")
+    else:
+        end_ts = end_ts.tz_convert("UTC")
+    idx = pd.date_range(start_ts, end_ts, freq="h")
     # Mon 00:00 SAST = Sun 22:00 UTC. Fri 23:00 SAST = Fri 21:00 UTC.
     sunday_open = (idx.dayofweek == 6) & (idx.hour >= 22)
     weekday = idx.dayofweek < 4

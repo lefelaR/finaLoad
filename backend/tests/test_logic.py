@@ -153,8 +153,8 @@ class LogicTests(unittest.TestCase):
         frame = pd.DataFrame(
             {
                 "close": [1.10, 1.1010, 1.1000],
-                "direction": ["bullish", "bearish", "neutral"],
-                "confidence": [70, 70, 40],
+                "direction": ["bullish", "neutral", "bearish"],
+                "confidence": [70, 40, 70],
             },
             index=index,
         )
@@ -164,7 +164,7 @@ class LogicTests(unittest.TestCase):
         second = by_time[index[1].isoformat()]
         third = by_time[index[2].isoformat()]
         self.assertEqual(first["outcome"], "win")
-        self.assertEqual(second["outcome"], "win")
+        self.assertEqual(second["outcome"], "skipped")
         self.assertEqual(third["outcome"], "pending")
 
     def test_oanda_parser_skips_corrupt_rows(self):

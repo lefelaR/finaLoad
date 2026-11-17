@@ -36,7 +36,7 @@ from app.logic import (
 )
 from app.model import latest_from_row, predict_frame, train_all
 from app.news import aggregate, load_news
-from app.oanda import fetch_history, headers, pricing_stream_url, twelve_data_price
+from app.oanda import fetch_history, headers, parse_oanda_time, pricing_stream_url, twelve_data_price
 
 log = logging.getLogger("trendlens")
 CACHE = Path(__file__).resolve().parent.parent / ".cache"
@@ -206,7 +206,10 @@ class Engine:
     async def _load_usdzar(self) -> None:
         try:
             async with httpx.AsyncClient(timeout=4) as client:
-                response = await client.get("https://api.frankfurter.app/latest?from=USD&to=ZAR")
+                response = await client.get(
+                    "https://api.frankfurter.app/latest?from=USD&to=ZAR",
+                    follow_redirects=True,
+                )
                 response.raise_for_status()
                 rate = float(response.json()["rates"]["ZAR"])
             self.usdzar = rate
@@ -460,6 +463,7 @@ class Engine:
                     "news_label": signal["news_label"],
                     "probs": signal["probs"],
                     "penalty": signal["penalty"],
+                    "tech_lean": signal.get("tech_lean", signal["direction"]),
                     "accuracy": self.accuracy.get(timeframe, {}),
                 }
             )
@@ -611,7 +615,7 @@ class Engine:
                             asks = message.get("asks") or []
                             if not bids or not asks:
                                 continue
-                            when = datetime.fromisoformat(message["time"].replace("Z", "+00:00"))
+                            when = parse_oanda_time(message["time"])
                             self.apply_bid_ask(float(bids[0]["price"]), float(asks[0]["price"]), when)
                             self.source = "oanda"
             except Exception:

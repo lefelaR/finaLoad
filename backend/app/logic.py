@@ -11,7 +11,8 @@ MODEL_VERSION = "model_eurusd_v1.0.pkl"
 DISCLAIMER = "For educational purposes only, not financial advice."
 
 # Next-bar move (in pips) treated as noise when labeling the model.
-FLAT_PIPS = {"H1": 4.0, "H4": 8.0, "D1": 20.0}
+# Moves inside this band are labeled flat. Wider bands made H1/H4 almost all neutral.
+FLAT_PIPS = {"H1": 1.0, "H4": 3.0, "D1": 8.0}
 # How long a backtest trade may stay open, in bars of that timeframe.
 HORIZON_BARS = {"H1": 8, "H4": 6, "D1": 5}
 
@@ -134,6 +135,8 @@ def alignment_badge(rows: list[dict]) -> dict:
         return {"label": "All aligned bearish", "tone": "bear"}
     if tones and all(tone == "bull" for tone in tones):
         return {"label": "All aligned bullish", "tone": "bull"}
+    if tones and all(tone == "neutral" for tone in tones):
+        return {"label": "No directional call — all neutral", "tone": "neutral"}
     return {"label": "Mixed — " + ", ".join(parts), "tone": "mixed"}
 
 

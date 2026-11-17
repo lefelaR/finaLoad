@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Shell } from "@/components/Shell";
 import { api, price, sast, toneClass } from "@/lib/format";
 import type { HistoryRow } from "@/lib/types";
@@ -13,6 +13,10 @@ export default function HistoryPage() {
   );
 }
 
+type SortKey = "time" | "timeframe" | "prediction" | "confidence" | "outcome" | "pips" | "price";
+
+const TIMEFRAME_ORDER: Record<string, number> = { M15: 0, H1: 1, H4: 2, D1: 3 };
+
 function History() {
   const [timeframe, setTimeframe] = useState("ALL");
   const [outcome, setOutcome] = useState("ALL");
@@ -20,6 +24,27 @@ function History() {
   const [end, setEnd] = useState("");
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("time");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((direction) => (direction === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir(key === "time" || key === "confidence" || key === "pips" || key === "price" ? "desc" : "asc");
+  }
+
+  const sorted = useMemo(() => {
+    const copy = [...rows];
+    const factor = sortDir === "asc" ? 1 : -1;
+    copy.sort((a, b) => {
+      const result = compareRows(a, b, sortKey);
+      return result * factor;
+    });
+    return copy;
+  }, [rows, sortKey, sortDir]);
 
   useEffect(() => {
     let live = true;
@@ -60,17 +85,17 @@ function History() {
         <table className="w-full text-left text-sm">
           <thead className="text-[11px] uppercase tracking-[0.14em] text-muted">
             <tr>
-              <th className="py-2 font-medium">Timestamp</th>
-              <th className="py-2 font-medium">Timeframe</th>
-              <th className="py-2 font-medium">Prediction</th>
-              <th className="py-2 font-medium">Confidence</th>
-              <th className="py-2 font-medium">Outcome</th>
-              <th className="py-2 font-medium">Pips moved</th>
-              <th className="py-2 font-medium">Price</th>
+              <SortHeader label="Timestamp" column="time" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHeader label="Timeframe" column="timeframe" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHeader label="Prediction" column="prediction" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHeader label="Confidence" column="confidence" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHeader label="Outcome" column="outcome" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHeader label="Pips moved" column="pips" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+              <SortHeader label="Price" column="price" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {sorted.map((row) => (
               <tr key={row.time + row.timeframe} className="border-t border-line">
                 <td className="py-2 font-mono text-xs">{sast(row.time)}</td>
                 <td className="py-2 font-mono">{row.timeframe}</td>
@@ -88,6 +113,48 @@ function History() {
         {rows.length === 0 && !error ? <p className="py-6 text-sm text-muted">No signals in this filter.</p> : null}
       </div>
     </section>
+  );
+}
+
+function compareRows(a: HistoryRow, b: HistoryRow, key: SortKey): number {
+  if (key === "time") return a.time.localeCompare(b.time);
+  if (key === "timeframe") return (TIMEFRAME_ORDER[a.timeframe] ?? 9) - (TIMEFRAME_ORDER[b.timeframe] ?? 9);
+  if (key === "prediction") return a.prediction.localeCompare(b.prediction);
+  if (key === "confidence") return a.confidence - b.confidence;
+  if (key === "outcome") return a.outcome.localeCompare(b.outcome);
+  if (key === "pips") return a.pips - b.pips;
+  return a.price - b.price;
+}
+
+function SortHeader({
+  label,
+  column,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  column: SortKey;
+  sortKey: SortKey;
+  sortDir: "asc" | "desc";
+  onSort: (column: SortKey) => void;
+}) {
+  const active = sortKey === column;
+  const mark = active ? (sortDir === "asc" ? "↑" : "↓") : "";
+  return (
+    <th className="py-2 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}
+        className={`inline-flex items-center gap-1 uppercase tracking-[0.14em] ${active ? "text-ink" : "text-muted"}`}
+      >
+        {label}
+        <span className="w-3 text-[10px]" aria-hidden="true">
+          {mark}
+        </span>
+      </button>
+    </th>
   );
 }
 

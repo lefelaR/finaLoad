@@ -8,6 +8,7 @@ import os
 import time
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
@@ -92,13 +93,13 @@ class PositionIn(BaseModel):
 
 
 class AlertSettingsIn(BaseModel):
-    on_flip: bool | None = None
-    on_confidence: bool | None = None
-    on_news: bool | None = None
-    quiet_hours: bool | None = None
-    quiet_start: str | None = None
-    quiet_end: str | None = None
-    email: str | None = None
+    on_flip: Optional[bool] = None
+    on_confidence: Optional[bool] = None
+    on_news: Optional[bool] = None
+    quiet_hours: Optional[bool] = None
+    quiet_start: Optional[str] = None
+    quiet_end: Optional[str] = None
+    email: Optional[str] = None
 
 
 @app.post("/api/auth/login")
@@ -167,8 +168,8 @@ def signal_history(
     request: Request,
     timeframe: str = "ALL",
     outcome: str = "ALL",
-    start: str | None = None,
-    end: str | None = None,
+    start: Optional[str] = None,
+    end: Optional[str] = None,
 ):
     _guard(request)
     if not engine.ready:

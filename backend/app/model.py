@@ -13,23 +13,19 @@ import xgboost as xgb
 
 from app.explain import top_reasons
 from app.indicators import FEATURE_COLUMNS, add_indicators
-from app.logic import FLAT_PIPS, MODEL_VERSION, PIP
+from app.logic import MODEL_VERSION
 
 log = logging.getLogger("trendlens.model")
 CACHE = Path(__file__).resolve().parent.parent / ".cache"
 
 
 def label_frame(frame: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    """1 = next bar up, 0 = next bar down. Neutral is applied later by the 55% gate."""
+    del timeframe  # one label rule for every timeframe: the sign of the next bar
     df = frame.copy()
     future = df["close"].shift(-1) - df["close"]
-    pips = future / PIP
-    flat = FLAT_PIPS[timeframe]
-    # 0 bearish, 1 bullish, 2 neutral
-    labels = np.full(len(df), 2, dtype=int)
-    labels[pips > flat] = 1
-    labels[pips < -flat] = 0
-    df["label"] = labels
-    df.loc[future.isna(), "label"] = np.nan
+    df["label"] = np.where(future > 0, 1, 0).astype(float)
+    df.loc[future.isna() | (future == 0), "label"] = np.nan
     return df
 
 
@@ -45,19 +41,25 @@ def train_timeframe(frame: pd.DataFrame, timeframe: str) -> dict:
     oos_start = usable.index.max() - pd.Timedelta(days=365)
     train = usable[usable.index < oos_start]
     test = usable[usable.index >= oos_start]
-    if train["label"].nunique() < 3 or len(train) < 200:
-        raise RuntimeError(f"Not enough {timeframe} rows to train a 3-class model.")
+    if train["label"].nunique() < 2 or len(train) < 200:
+        raise RuntimeError(f"Not enough {timeframe} rows to train the model.")
 
-    dtrain = xgb.DMatrix(train[FEATURE_COLUMNS], label=train["label"], feature_names=FEATURE_COLUMNS)
+    counts = train["label"].value_counts()
+    weights = train["label"].map(lambda label: float(len(train) / (2 * counts[label])))
+    dtrain = xgb.DMatrix(
+        train[FEATURE_COLUMNS],
+        label=train["label"],
+        weight=weights,
+        feature_names=FEATURE_COLUMNS,
+    )
     params = {
-        "objective": "multi:softprob",
-        "num_class": 3,
+        "objective": "binary:logistic",
         "max_depth": 4,
         "eta": 0.08,
         "subsample": 0.85,
         "colsample_bytree": 0.85,
         "min_child_weight": 8,
-        "eval_metric": "mlogloss",
+        "eval_metric": "logloss",
         "nthread": 2,
     }
     booster = xgb.train(params, dtrain, num_boost_round=80)
@@ -65,7 +67,7 @@ def train_timeframe(frame: pd.DataFrame, timeframe: str) -> dict:
     if len(test):
         dtest = xgb.DMatrix(test[FEATURE_COLUMNS], feature_names=FEATURE_COLUMNS)
         probs = booster.predict(dtest)
-        pred = probs.argmax(axis=1)
+        pred = (probs >= 0.5).astype(int)
         accuracy = float((pred == test["label"].to_numpy()).mean())
     return {
         "timeframe": timeframe,
@@ -81,16 +83,16 @@ def train_timeframe(frame: pd.DataFrame, timeframe: str) -> dict:
 def predict_rows(bundle: dict, rows: pd.DataFrame) -> pd.DataFrame:
     out = rows.copy()
     matrix = xgb.DMatrix(out[FEATURE_COLUMNS], feature_names=FEATURE_COLUMNS)
-    probs = bundle["booster"].predict(matrix)
-    out["p_bear"] = probs[:, 0]
-    out["p_bull"] = probs[:, 1]
-    out["p_neutral"] = probs[:, 2]
-    out["pred"] = probs.argmax(axis=1)
-    mapping = {0: "bearish", 1: "bullish", 2: "neutral"}
-    out["direction"] = [mapping[int(value)] for value in out["pred"]]
-    out["confidence"] = out[["p_bear", "p_bull", "p_neutral"]].max(axis=1) * 100
+    p_bull = bundle["booster"].predict(matrix)
+    out["p_bull"] = p_bull
+    out["p_bear"] = 1 - p_bull
+    out["p_neutral"] = 0.0
+    out["pred"] = (p_bull >= 0.5).astype(int)
+    out["raw_direction"] = np.where(p_bull >= 0.5, "bullish", "bearish")
+    out["confidence"] = np.maximum(p_bull, 1 - p_bull) * 100
+    out["direction"] = out["raw_direction"]
     out["withheld"] = False
-    forced = (out["direction"] != "neutral") & (out["confidence"] < 55)
+    forced = out["confidence"] < 55
     out.loc[forced, "direction"] = "neutral"
     out.loc[forced, "withheld"] = True
     return out
@@ -105,18 +107,8 @@ def predict_frame(bundle: dict) -> pd.DataFrame:
 def shap_for_row(booster: xgb.Booster, row: pd.Series) -> list[tuple[str, float, float]]:
     matrix = xgb.DMatrix(pd.DataFrame([row[FEATURE_COLUMNS]]), feature_names=FEATURE_COLUMNS)
     try:
-        contribs = booster.predict(matrix, pred_contribs=True)
-        array = np.asarray(contribs)
-        width = len(FEATURE_COLUMNS) + 1
-        if array.ndim == 3:
-            per_class = array[0]
-        elif array.shape[-1] == width and array.ndim == 2 and array.shape[0] == 3:
-            per_class = array
-        else:
-            flat = array.reshape(-1)
-            per_class = flat.reshape(3, width)
-        pred = int(np.argmax(booster.predict(matrix)[0]))
-        values = per_class[pred][:-1]
+        contribs = np.asarray(booster.predict(matrix, pred_contribs=True)).reshape(-1)
+        values = contribs[:-1]
         pairs = []
         for name, shap_value in zip(FEATURE_COLUMNS, values):
             raw = row[name]
@@ -140,6 +132,7 @@ def latest_from_row(bundle: dict, row: pd.Series, news_lines: list[str]) -> dict
     price = float(row["close"])
     atr = float(row["atr_14"]) if row["atr_14"] == row["atr_14"] else 0.0
     pairs = shap_for_row(bundle["booster"], row)
+    explain_direction = str(row["raw_direction"]) if "raw_direction" in row.index else direction
     tech_score = round(float((row["p_bull"] - row["p_bear"]) * 100))
     return {
         "timeframe": bundle["timeframe"],
@@ -149,7 +142,8 @@ def latest_from_row(bundle: dict, row: pd.Series, news_lines: list[str]) -> dict
         "price": round(price, 5),
         "atr": atr,
         "tech_score": max(-100, min(100, tech_score)),
-        "reasons": top_reasons(pairs, news_lines),
+        "reasons": top_reasons(pairs, news_lines, explain_direction),
+        "tech_lean": explain_direction,
         "features": {
             name: None if row[name] != row[name] else round(float(row[name]), 6) for name in FEATURE_COLUMNS
         },

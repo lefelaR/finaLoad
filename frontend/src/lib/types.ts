@@ -39,6 +39,7 @@ export type TimeframeSignal = {
   news_label: string;
   probs: { bearish: number; bullish: number; neutral: number };
   penalty: boolean;
+  tech_lean: string;
   accuracy: { win_rate: number | null; signals: number };
 };
 

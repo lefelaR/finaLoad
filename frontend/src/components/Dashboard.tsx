@@ -179,8 +179,9 @@ export function Dashboard() {
             <div>
               <div className={`text-sm font-medium ${toneClass(board.alignment.tone)}`}>{board.alignment.label}</div>
               <div className="mt-1 text-xs text-muted">
-                Last 30 days accuracy: {selected.accuracy.win_rate ?? "—"}% ({selected.timeframe}) —{" "}
-                {selected.accuracy.signals} signals
+                {selected.accuracy.signals
+                  ? `Last 30 days accuracy: ${selected.accuracy.win_rate}% (${selected.timeframe}) — ${selected.accuracy.signals} signals`
+                  : `Last 30 days: no resolved ${selected.timeframe} signals`}
               </div>
             </div>
             <div className="flex gap-1">
@@ -330,7 +331,9 @@ function SignalCard({
         <p className="mt-2 text-sm text-amber">Technical confidence reduced 20% — strong bearish news and a high-impact event inside an hour.</p>
       ) : null}
       {signal.withheld && !signal.conflict ? (
-        <p className="mt-2 text-sm text-amber">Below 55% — no directional call.</p>
+        <p className="mt-2 text-sm text-amber">
+          Technical lean is {signal.tech_lean}, but confidence is under 55%, so the call stays neutral.
+        </p>
       ) : null}
 
       <div className="mt-5 space-y-3">
@@ -367,9 +370,9 @@ function SignalCard({
             </div>
           ))}
           <div className="contents">
-            <dt className="text-muted">P(bear / bull / flat)</dt>
+            <dt className="text-muted">P(bear / bull)</dt>
             <dd>
-              {signal.probs.bearish}/{signal.probs.bullish}/{signal.probs.neutral}
+              {signal.probs.bearish}/{signal.probs.bullish}
             </dd>
           </div>
         </dl>

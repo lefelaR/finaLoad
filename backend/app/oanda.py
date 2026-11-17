@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -26,6 +27,16 @@ def headers() -> dict:
     return {"Authorization": f"Bearer {token}", "Accept-Datetime-Format": "RFC3339"}
 
 
+def parse_oanda_time(value: str) -> datetime:
+    """OANDA sends nanoseconds. Python 3.9 fromisoformat accepts microseconds."""
+    text = value.strip().replace("Z", "+00:00")
+    match = re.match(r"^(.*T\d{2}:\d{2}:\d{2})(?:\.(\d+))?([+-]\d{2}:\d{2})$", text)
+    if not match:
+        return datetime.fromisoformat(text)
+    fraction = (match.group(2) or "0")[:6].ljust(6, "0")
+    return datetime.fromisoformat(f"{match.group(1)}.{fraction}{match.group(3)}")
+
+
 def parse_candle(candle: dict, granularity: str) -> tuple[dict | None, str | None]:
     if not candle.get("complete", True) and candle.get("volume", 1) == 0:
         return None, "empty incomplete candle"
@@ -34,7 +45,7 @@ def parse_candle(candle: dict, granularity: str) -> tuple[dict | None, str | Non
     ask = candle.get("ask") or {}
     try:
         row = {
-            "time": datetime.fromisoformat(candle["time"].replace("Z", "+00:00")),
+            "time": parse_oanda_time(candle["time"]),
             "open": float(mid["o"]),
             "high": float(mid["h"]),
             "low": float(mid["l"]),

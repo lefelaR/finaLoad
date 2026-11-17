@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+def _influence(shap_value: float, direction: str) -> str:
+    # TreeSHAP on the binary model is the push toward a bullish next bar.
+    toward_bull = shap_value >= 0
+    if direction == "bearish":
+        return "supports bearish" if not toward_bull else "argues against bearish"
+    if direction == "bullish":
+        return "supports bullish" if toward_bull else "argues against bullish"
+    return "leans bullish" if toward_bull else "leans bearish"
+
+
 def describe_feature(name: str, value: float) -> str:
     if name == "ema200_dist":
         side = "above" if value > 0 else "below"
@@ -34,9 +44,10 @@ def describe_feature(name: str, value: float) -> str:
             return "MACD histogram is positive"
         return "MACD histogram is negative"
     if name == "adx_14":
-        if value >= 25:
-            return f"ADX {value:.0f} — the trend has strength"
-        return f"ADX {value:.0f} — the trend is soft"
+        rounded = int(round(value))
+        if rounded >= 25:
+            return f"ADX {rounded} — the trend has strength"
+        return f"ADX {rounded} — the trend is soft"
     if name == "atr_pct":
         return f"ATR is {value * 100:.2f}% of price"
     if name == "bb_pct":
@@ -63,15 +74,19 @@ def describe_feature(name: str, value: float) -> str:
     return name
 
 
-def top_reasons(shap_pairs: list[tuple[str, float, float]], news_lines: list[str], limit: int = 5) -> list[str]:
+def top_reasons(
+    shap_pairs: list[tuple[str, float, float]],
+    news_lines: list[str],
+    direction: str = "neutral",
+    limit: int = 5,
+) -> list[str]:
     """shap_pairs is (feature, shap_value, raw_value), already sorted by |shap|."""
     reasons = []
     for name, shap_value, raw in shap_pairs:
         if raw is None:
             continue
         text = describe_feature(name, raw)
-        influence = "supports the call" if shap_value >= 0 else "pushes the other way"
-        reasons.append(f"{text} — {influence}")
+        reasons.append(f"{text} — {_influence(shap_value, direction)}")
         if len(reasons) == max(0, limit - len(news_lines)):
             break
     return (reasons + news_lines)[:limit]
